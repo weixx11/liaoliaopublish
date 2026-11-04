@@ -105,24 +105,27 @@ class LiaoshangbaoPlatform(PlatformAdapter):
             for handle in handles:
                 handle.close()
 
-    def publish(self, article, images=()):
+    def publish(self, article, images=(), *, free_images=()):
         if not self.logged_in:
             raise RuntimeError("请先登录料商宝")
         fields = [
             ("uid", self.uid), ("sid", self.sid), ("title", article["title"]),
             ("title2", article.get("subtitle", "")),
-            ("shortMsg", article.get("summary", "")), ("free_content", article.get("free_content", "")),
+            ("shortMsg", article.get("subtitle",article.get("summary", ""))), ("free_content", article.get("free_content", "")),
             ("content", article["content"]), ("price", str(article.get("price", "10"))),
             ("showLabel", article.get("label", "")), ("onSeld", "1"), ("canVip", "1"),
             ("bgimgid", "img/a001.png"), ("canBuyCount", "0"), ("playTime", ""),
             ("autoSeldTime", ""), ("autoNoticeTime", ""), ("freeTime", ""), ("validTime", ""),
             ("fsLv", "0"), ("allZK", "10"),
             ("canZK", str(LiaoshangbaoDiscountValue.DISCOUNT_ALLOWED if article.get("discount_enabled", False) else LiaoshangbaoDiscountValue.DISCOUNT_FORBIDDEN)), ("canAgain", "0"), ("gid", "0"),
-            ("showLabel", article.get("label", "")), ("shortmsg", article.get("summary", "")),
+            ("showLabel", article.get("label", "")), ("shortmsg", article.get("subtitle",article.get("summary", ""))),
             ("freeContent", article.get("free_content", "")), ("content", article["content"]),
             ("preSale", str(article.get("presale", 1))),
         ]
-        result = self._post_multipart("/addPro", fields, images,
+        # The current protocol has a single tmpFileN image sequence. Until a
+        # separate free-image field is verified, use it for both editor areas.
+        attachments = tuple(free_images) + tuple(images)
+        result = self._post_multipart("/addPro", fields, attachments,
                                       "addIndex?uid={}&sid={}".format(self.uid, self.sid))
         if result.get("status") != 200:
             raise RuntimeError("料商宝发布失败：{}".format(result))
@@ -139,17 +142,21 @@ class LiaoshangbaoPlatform(PlatformAdapter):
         # updatePro request. In particular, updatePro has no title2 field.
         fields = [
             ("uid", self.uid), ("sid", self.sid), ("pid", str(article_id)),
-            ("title", article["title"]), ("shortMsg", article.get("summary", "")),
+            ("title", article["title"]), ("shortMsg", article.get("subtitle", "")),
             ("content", article["content"]), ("price", str(article.get("price", "10"))),
             ("customPrice", ""), ("showLabel", article.get("label", "")),
             ("canBuyCount", "0"), ("customCount", ""), ("playTime", ""),
             ("freeTime", ""), ("validTime", ""), ("onSeld", "1"), ("fsLv", "0"),
             ("allZK", "10"), ("canZK", str(LiaoshangbaoDiscountValue.DISCOUNT_ALLOWED if article.get("discount_enabled", False) else LiaoshangbaoDiscountValue.DISCOUNT_FORBIDDEN)),
             ("canVip", "1"), ("canAgain", "0"), ("gid", "0"), ("bgimgid", "img/a001.png"),
-            ("showLabel", article.get("label", "")), ("shortmsg", article.get("summary", "")),
+            ("showLabel", article.get("label", "")), ("shortmsg", article.get("subtitle", "")),
             ("content", article["content"]), ("preSale", str(article.get("presale", 1))),
         ]
         price = article.get("price")
+        if 'subtitle' not in article:
+            fields = [(name,value) for name,value in fields if name not in ('shortMsg','shortmsg')]
+        if 'label' not in article:
+            fields = [(name,value) for name,value in fields if name != 'showLabel']
         if price is None or not str(price).strip():
             raise ValueError("料商宝更新需要价格，请填写文章原价或新价格")
         result = self._post_multipart("/updatePro", fields, images,

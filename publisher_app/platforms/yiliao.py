@@ -1,10 +1,10 @@
 from requests import Session, RequestException
-import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from html import escape
 from enum import IntEnum
-from ..config import YILIAO_SESSION_FILE, YILIAO_URLS
+from ..config import YILIAO_URLS
+from ..storage import load_session, save_session
 from .base import PlatformAdapter
 
 
@@ -23,7 +23,7 @@ class YiliaoPlatform(PlatformAdapter):
         self.session = Session()
         self.user = {}
         try:
-            saved = json.loads(YILIAO_SESSION_FILE.read_text(encoding="utf-8"))
+            saved = load_session(self.name)
             self.user = saved.get("user_data", {})
             self.session.cookies.update(saved.get("cookies", {}))
         except (OSError, ValueError):
@@ -36,7 +36,7 @@ class YiliaoPlatform(PlatformAdapter):
     def login(self, account, password):
         result = self._post("login", {"account": account, "pwd": password, "proxyTag": ""})
         self.user = result or {}
-        YILIAO_SESSION_FILE.write_text(json.dumps({"user_data": self.user, "cookies": self.session.cookies.get_dict()}, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_session(self.name, {"user_data": self.user, "cookies": self.session.cookies.get_dict()})
         return self.user
 
     def _post(self, key, data):
@@ -91,6 +91,17 @@ class YiliaoPlatform(PlatformAdapter):
                        else YiliaoDiscountValue.DISCOUNT_FORBIDDEN)
         fields = {"id":str(article_id), "expertId":self.user.get("expertId"), "compType":"1", "publicTime":datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "lotteryType":6, "issueNo":None, "title":article.get("title", ""), "title2":article.get("subtitle", ""), "summary":self._html(article.get("summary", "")), "freeContent":self._html(article.get("free_content", "")), "beginTime":expiry.strftime("%Y-%m-%d %H:%M:%S"), "endTime":expiry.strftime("%Y-%m-%d %H:%M:%S"), "content":self._html(content), "playType":"9001", "planType":None, "hidden":0, "free":0, "matchs":None, "status":0, "verifyStatus":2, "verifyMsg":None, "activityId":0, "sportsId":4, "notifyAuto":0, "noDiscount":int(no_discount), "tags":"", "planPackAuto":0, "planPacks":"", "presell":int(bool(article.get("presale", 1))), "updateTimeShow":0, "qrcodeList":[]}
         price = article.get("price")
+        fields.pop('tags', None)
+        # Empty optional free-content input means preserve the existing article.
+        # _html('') produces <p></p>, which would overwrite the original content.
+        for source, target in (('summary','summary'), ('free_content','freeContent')):
+            if not str(article.get(source) or '').strip():
+                fields.pop(target,None)
+        if 'subtitle' not in article:
+            fields.pop('title2',None)
+        if 'tags' in article:
+            tags = article['tags']
+            fields['tags'] = ','.join(tags) if isinstance(tags,(list,tuple)) else str(tags)
         if price is not None and str(price).strip():
             fields.update(price=str(price).strip(), priceReal=str(price).strip())
         result = self._post("modify", fields)
